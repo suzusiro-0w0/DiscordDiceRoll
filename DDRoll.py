@@ -1,35 +1,62 @@
 import discord
 from discord.ext import commands
 import random
-
-
-
-
+import json
+import os
 
 ################################
 ################################
 ################################
 TOKEN = ""
-lang = "ja" # "en" or "ja"
+lang = "ja"  # "en" or "ja"
 ################################
 ################################
 ################################
 
+# ファイル名
+MESSAGE_DATA_FILE = "message_ids.json"
 
+# ローカルにメッセージ ID を保存する関数
+def save_message_ids(message_ids):
+    try:
+        with open(MESSAGE_DATA_FILE, "w") as file:
+            json.dump(message_ids, file)
+    except Exception as e:
+        print(f"Failed to save message IDs: {e}")
 
+# ローカルからメッセージ ID を読み込む関数
+def load_message_ids():
+    if os.path.exists(MESSAGE_DATA_FILE):
+        try:
+            with open(MESSAGE_DATA_FILE, "r") as file:
+                return json.load(file)
+        except Exception as e:
+            print(f"Failed to load message IDs: {e}")
+    return []
+
+# 古いメッセージを削除する関数
+async def delete_old_messages(channel, message_ids):
+    for message_id in message_ids:
+        try:
+            message = await channel.fetch_message(message_id)
+            await message.delete()
+        except discord.NotFound:
+            pass
+    save_message_ids([])  # 削除後にファイルをクリア
 
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-# メッセージIDの管理
-message_id = None
+# メッセージ ID の管理
+message_ids = []
 
 # 情報の初期化
 participants = set()
 roll_results = {}
 logs = []
 
+# ボットの状態管理フラグ
 flag = False
 
 # 情報を集約してメッセージ内容を生成
@@ -47,99 +74,73 @@ def generate_message_content():
 
 # メッセージの送信または編集
 async def send_or_edit_message(channel):
-    global message_id
+    global message_ids
     content = generate_message_content()
-    if message_id:
+    if message_ids:
         try:
-            message = await channel.fetch_message(message_id)
+            message = await channel.fetch_message(message_ids[0])
             await message.edit(content=content)
         except discord.NotFound:
             message = await channel.send(content)
-            message_id = message.id
+            message_ids[0] = message.id
     else:
         message = await channel.send(content)
-        message_id = message.id
+        message_ids.append(message.id)
+    save_message_ids(message_ids)
 
 # ボタンのビューを定義
 class DiceRollView(discord.ui.View):
     def __init__(self):
-        super().__init__()
+        super().__init__(timeout=None)
+        if lang == "ja":
+            self.button_label = ["ダイスロールに参加", "参加者リセット", "ダイスロール"]
+            self.log_text = ["さんがダイスロールに参加しました。", "参加者リストをリセットしました。", "ダイスロールを実行しました。"]
+        else:
+            self.button_label = ["Join Roll", "Reset Participants", "Roll Dice"]
+            self.log_text = ["Joined the dice roll.", "Reset the participants list.", "Executed the dice roll."]
 
-    button_label = []
-    log_text = []
-    if lang == "ja":
-        button_label = ["ダイスロールに参加", "参加者リセット", "ダイスロール"]
-        log_text = ["さんがダイスロールに参加しました。", "参加者リストをリセットしました。", "ダイスロールを実行しました。"]
-    else:
-        button_label = ["Join Roll", "Reset Participants", "Roll Dice"]
-        log_text = ["Joined the dice roll.", "Reset the participants list.", "Executed the dice roll."]
-
-    @discord.ui.button(label=button_label[0], style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="参加", style=discord.ButtonStyle.primary)
     async def join_roll(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
         user_id = interaction.user.id
         if user_id not in participants:
             participants.add(user_id)
-            logs.append(f"{interaction.user.name} {DiceRollView.log_text[0]}")
+            logs.append(f"{interaction.user.name} {self.log_text[0]}")
             await send_or_edit_message(interaction.channel)
 
-    @discord.ui.button(label=button_label[1], style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="リセット", style=discord.ButtonStyle.danger)
     async def reset_participants(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
         participants.clear()
-        logs.append(DiceRollView.log_text[1])
+        logs.append(self.log_text[1])
         await send_or_edit_message(interaction.channel)
 
-    @discord.ui.button(label=button_label[2], style=discord.ButtonStyle.success)
+    @discord.ui.button(label="ロール", style=discord.ButtonStyle.success)
     async def roll_dice(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
         if not participants:
             return
         global roll_results
         roll_results = {user_id: random.randint(1, 100) for user_id in participants}
-        logs.append(DiceRollView.log_text[2])
+        logs.append(self.log_text[2])
         await send_or_edit_message(interaction.channel)
-
-    '''
-    @discord.ui.button(label="全メッセージ削除", style=discord.ButtonStyle.secondary)
-    async def delete_all_messages(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()
-        global message_id
-        if message_id:
-            try:
-                message = await interaction.channel.fetch_message(message_id)
-                await message.delete()
-            except discord.NotFound:
-                pass
-            message_id = None
-        logs.append("全てのメッセージを削除しました。")
-        flag = False
-    '''
-
 
 @bot.command(name="start", description="ダイスロールBotを開始します")
 async def start_command(ctx):
-    await start(ctx.channel)
-    await ctx.message.delete()
-
-
-@bot.tree.command(name="start", description="ダイスロールBotを開始します")
-async def start_slash(interaction: discord.Interaction):
-    await start(interaction.channel)
-    await interaction.response.send_message("")
-
-async def start(channel):
     global flag
+    global message_ids
+    message_ids = load_message_ids()
+    await delete_old_messages(ctx.channel, message_ids)
     if not flag:
         view = DiceRollView()
-        await channel.send("", view=view)
-        await send_or_edit_message(channel)
+        await ctx.send("操作ボタン:", view=view)
+        await send_or_edit_message(ctx.channel)
         flag = True
-
 
 @bot.event
 async def on_ready():
-    await bot.tree.sync()
     print(f'Logged in as {bot.user}!')
+    global message_ids
+    message_ids = load_message_ids()
 
 bot.run(TOKEN)
