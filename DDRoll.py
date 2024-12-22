@@ -138,6 +138,7 @@ async def start_command(ctx):
         save_message_ids(message_ids)
         await send_or_edit_message(ctx.channel)
         flag = True
+        await ctx.message.delete()
 
 @bot.event
 async def on_ready():
