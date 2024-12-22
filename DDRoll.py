@@ -76,13 +76,13 @@ def generate_message_content():
 async def send_or_edit_message(channel):
     global message_ids
     content = generate_message_content()
-    if message_ids:
+    if len(message_ids) > 1:
         try:
-            message = await channel.fetch_message(message_ids[0])
+            message = await channel.fetch_message(message_ids[1])
             await message.edit(content=content)
         except discord.NotFound:
             message = await channel.send(content)
-            message_ids[0] = message.id
+            message_ids[1] = message.id
     else:
         message = await channel.send(content)
         message_ids.append(message.id)
@@ -133,7 +133,9 @@ async def start_command(ctx):
     await delete_old_messages(ctx.channel, message_ids)
     if not flag:
         view = DiceRollView()
-        await ctx.send("操作ボタン:", view=view)
+        button_message = await ctx.send("操作ボタン:", view=view)
+        message_ids = [button_message.id]  # 操作ボタンメッセージを保存
+        save_message_ids(message_ids)
         await send_or_edit_message(ctx.channel)
         flag = True
 
